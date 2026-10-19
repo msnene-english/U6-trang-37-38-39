@@ -38,6 +38,13 @@
     .gap-fill-input { width: 170px !important; min-height: 44px !important; height: 44px !important; box-sizing: border-box !important; padding: 6px 12px !important; margin: 3px 6px !important; display: inline-block !important; border: 2px solid #ccd1d9 !important; border-radius: 6px !important; font-size: 16px !important; vertical-align: middle; }
     .gap-fill-input:focus { border-color: #3498db !important; outline: none !important; }
     
+    .tick-input-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+    .tick-input-row .gap-fill-input { width: calc(100% - 150px) !important; max-width: 450px; min-width: 220px; margin: 0 !important; }
+    .btn-correct-toggle { min-height: 44px; min-width: 120px; padding: 10px 18px; font-size: 15px; font-weight: 600; background: #eef2f7; color: #334155; border: 2px solid #cbd5e1; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn-correct-toggle:hover { background: #e2e8f0; border-color: #94a3b8; }
+    .btn-correct-toggle.active { background: #22c55e !important; color: #ffffff !important; border-color: #16a34a !important; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25); }
+    .btn-correct-toggle:disabled { opacity: 0.6; cursor: not-allowed; }
+    
     .rewrite-input { width: 100%; min-height: 44px; padding: 12px 14px; border: 2px solid #ccd1d9; border-radius: 6px; font-size: 16px; font-family: inherit; box-sizing: border-box; }
     .rewrite-input:focus { border-color: #3498db; outline: none; }
     
@@ -256,7 +263,16 @@
                 let text = q.questionHTML;
                 q.blanks.forEach(b => {
                     let searchStr = `{{blank:${b.blankId}}}`;
-                    let inputHtml = `<input type="text" class="gap-fill-input" id="input-${q.id}-${b.blankId}" autocomplete="off" spellcheck="false" maxlength="80"> <span id="gap-res-${q.id}-${b.blankId}"></span>`;
+                    let inputHtml = '';
+                    if (q.hasCorrectBtn || b.hasCorrectBtn) {
+                        inputHtml = `<div class="tick-input-row">
+                            <input type="text" class="gap-fill-input" id="input-${q.id}-${b.blankId}" autocomplete="off" spellcheck="false" maxlength="80" placeholder="Nếu sai, viết từ sửa vào đây...">
+                            <button type="button" class="btn-correct-toggle" id="btn-correct-${q.id}-${b.blankId}" data-qid="${q.id}" data-bid="${b.blankId}" tabindex="0">✓ Correct</button>
+                            <span id="gap-res-${q.id}-${b.blankId}"></span>
+                        </div>`;
+                    } else {
+                        inputHtml = `<input type="text" class="gap-fill-input" id="input-${q.id}-${b.blankId}" autocomplete="off" spellcheck="false" maxlength="80"> <span id="gap-res-${q.id}-${b.blankId}"></span>`;
+                    }
                     if (text.includes(searchStr)) text = text.replace(searchStr, inputHtml);
                     else text += ' ' + inputHtml;
                 });
@@ -275,16 +291,54 @@
         });
 
         document.querySelectorAll('input').forEach(inp => {
-            inp.addEventListener('input', () => { if(inp.value.length === 1) playSelectSound(); });
+            inp.addEventListener('input', () => { 
+                if(inp.value.length === 1) playSelectSound(); 
+                if (inp.id && inp.id.startsWith('input-')) {
+                    let parts = inp.id.split('-');
+                    if (parts.length >= 3) {
+                        let qid = parts[1];
+                        let bid = parts[2];
+                        let cBtn = document.getElementById(`btn-correct-${qid}-${bid}`);
+                        if (cBtn) {
+                            let val = inp.value.trim().toLowerCase();
+                            if (val === 'correct' || val === '✓') {
+                                cBtn.classList.add('active');
+                            } else {
+                                cBtn.classList.remove('active');
+                            }
+                        }
+                    }
+                }
+            });
         });
     }
     
     quizContainer.addEventListener('click', e => {
         if (submitted) return;
         
+        let cBtn = e.target.closest('.btn-correct-toggle');
+        if (cBtn) {
+            let qid = cBtn.getAttribute('data-qid');
+            let bid = cBtn.getAttribute('data-bid');
+            if (locked[qid]) return;
+            let inputEl = document.getElementById(`input-${qid}-${bid}`);
+            if (!inputEl) return;
+            
+            if (cBtn.classList.contains('active')) {
+                cBtn.classList.remove('active');
+                inputEl.value = '';
+            } else {
+                cBtn.classList.add('active');
+                inputEl.value = 'Correct';
+                playSelectSound();
+            }
+            return;
+        }
+
         let opt = e.target.closest('.option');
         if (opt) {
             let qid = opt.getAttribute('data-qid');
+            let bid = opt.getAttribute('data-bid');
             if (locked[qid]) return;
             let qBlock = document.getElementById('q-block-' + qid);
             qBlock.querySelectorAll('.option').forEach(o => { o.classList.remove('selected'); });
@@ -332,7 +386,8 @@
     function showExplanation(q) {
         let ex = document.getElementById('expl-' + q.id);
         if (q.explanationHTML && ex) {
-            ex.innerHTML = q.explanationHTML.includes('Giải thích:') ? q.explanationHTML : '<strong>Giải thích:</strong><br>' + q.explanationHTML;
+            let hasHeading = q.explanationHTML.includes('Giải thích') || q.explanationHTML.includes('<strong>') || q.explanationHTML.includes('<p>');
+            ex.innerHTML = hasHeading ? q.explanationHTML : '<h4 style="margin:0 0 10px; color:#2c3e50;">💡 Giải thích chi tiết:</h4>' + q.explanationHTML;
             ex.style.display = 'block';
         }
     }
@@ -377,9 +432,11 @@
                 allCorrect = false;
                 inputEl.style.backgroundColor = '#fdedec';
                 inputEl.style.borderColor = '#e74c3c';
-                resSpan.innerHTML = ` <span style="color:#e74c3c;font-weight:bold;">❌</span> <span style="color:#2ecc71; font-weight:bold; margin-left: 5px;">${esc(b.correctAnswers[0])}</span>`;
+                resSpan.innerHTML = ` <span style="color:#e74c3c;font-weight:bold;">❌</span> <span style="color:#2ecc71; font-weight:bold; margin-left: 5px;">(Đáp án đúng: <b>${esc(b.correctAnswers[0])}</b>)</span>`;
             }
             if (inputEl) { inputEl.disabled = true; }
+            let cBtn = document.getElementById(`btn-correct-${q.id}-${b.blankId}`);
+            if (cBtn) { cBtn.disabled = true; cBtn.style.pointerEvents = 'none'; }
         });
         if (allCorrect) playCorrectSound(); else playWrongSound();
         document.getElementById('q-block-' + q.id).style.pointerEvents = 'none';
@@ -551,7 +608,7 @@
                     <strong>Câu ${index + 1}:</strong> ${q.questionHTML ? q.questionHTML.replace(/\{\{blank:[^\}]+\}\}/g, '___') : ''}<br>
                     <span style="color:#e74c3c;">Học sinh: <span style="${hsStr.includes('chưa trả lời') ? '' : 'text-decoration:line-through;'}">${esc(hsStr)}</span></span><br>
                     <span style="color:#2ecc71; font-weight:bold;">Đáp án đúng: ${esc(rightStr)}</span>
-                    <div style="margin-top:6px;font-size:13.5px;color:#333;">${q.explanationHTML ? (q.explanationHTML.includes('Giải thích:') ? q.explanationHTML : '<em>Giải thích:</em><br>' + q.explanationHTML) : ''}</div>
+                    <div style="margin-top:6px;font-size:13.5px;color:#333;">${q.explanationHTML || ''}</div>
                 </div>`;
             }
         });
@@ -587,7 +644,7 @@
         }
         
         document.querySelectorAll('.check-btn').forEach(b => b.disabled = true);
-        document.querySelectorAll('input, .option').forEach(el => { el.disabled = true; el.style.pointerEvents = 'none'; el.style.opacity = '0.7'; });
+        document.querySelectorAll('input, .option, .btn-correct-toggle').forEach(el => { el.disabled = true; el.style.pointerEvents = 'none'; el.style.opacity = '0.7'; });
     };
 
     window.onload = init;
